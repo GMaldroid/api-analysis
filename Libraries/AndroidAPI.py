@@ -1,4 +1,3 @@
-from enum import Flag
 import re
 
 class AndroidAPI:
@@ -34,6 +33,12 @@ class AndroidAPI:
                     break
                 method_name = method_name + string_api[i]
         return AndroidAPI(True, invoke, package, method_name)
+    
+    def pares_android(string_api: str):
+        if string_api.find("Landoird") == -1 and string_api.find("Ljava") == -1:
+            return AndroidAPI(is_api=False)
+        else:
+            return AndroidAPI.parse(string_api)
 
     def __is_api(string_api: str):
         if re.search(r'^invoke', string_api):
