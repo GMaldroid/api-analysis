@@ -9,6 +9,7 @@ class AndroidAPI:
         self.full_api_call = package + ";->" + method_name
     
     def parse(string_api: str):
+        string_api = string_api.strip()
         if AndroidAPI.__is_api(string_api) == False:
             return AndroidAPI(is_api=False)
 
