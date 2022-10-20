@@ -1,15 +1,8 @@
 import os
 import stat
 
-def list_smali_files(path: str):
-    smalis = []
-    for root, _, filenames in os.walk(path):
-        for filename in filenames:
-            smalis.append(os.path.join(root, filename))
-    return smalis
-
 def list_files(path: str):
-    return [path + f for f in os.listdir(path)]
+    return [path + "\\" + f for f in os.listdir(path)]
 
 def rmtree(path: str):
     for root, dirs, files in os.walk(path, topdown=False):
