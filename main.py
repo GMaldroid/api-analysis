@@ -2,11 +2,13 @@ import sys
 import os
 import json
 import numpy as np
+import pandas as pd
 from functools import reduce
 from Libraries.AndroidAPI import AndroidAPI
 from Libraries.Files import rmtree, list_files
 from Libraries.ApkTool import decompile
 from Libraries.Smali import list_smali_files
+from Libraries.Csv import save_int_csv
 
 
 def extract():
@@ -70,21 +72,26 @@ def total():
     def process_content(result, file):
         content = json.load(open(file))
         data = content["data"]
+        list_api_call = []
 
         for method in data:
-            for api in method["api"]:
-                if api["full_api_call"] in result:
-                    result[api["full_api_call"]] += 1
-                else:
-                    result[api["full_api_call"]] = 1
+            for api_object in method["api"]:
+                if api_object["full_api_call"] not in list_api_call:
+                    list_api_call.append(api_object["full_api_call"])
+        
+        for api in list_api_call:
+            if api in result:
+                result[api] += 1
+            else:
+                result[api] = 1
 
         return result
 
-    contents = dict(reduce(process_content, list_files("./output/Benign"), dict()))
-    open("./output/total-call/Benign.json", "w").write(json.dumps(contents, indent=4))
+    contents = dict(reduce(process_content, list_files("./output/extract-data/SMS"), dict()))
+    open("./output/total-call/SMS.json", "w").write(json.dumps(contents, indent=4))
 
 def transform():
-    data = json.load(open("./output/total-call/SMS.json", "r"))
+    data = json.load(open("output/total-call/SMS.json", "r"))
     result = list()
     for key in data.keys():
         result.append({
@@ -96,7 +103,7 @@ def transform():
         "type": "smsmalware",
         "data": result
     }
-    open("./output/SMS.json", "w").write(json.dumps(result, indent=4))
+    open("./output/number-of-call-for-app/smsmalware.json", "w").write(json.dumps(result, indent=4))
     pass
 
 def filter():
@@ -139,35 +146,83 @@ def filter():
     )
 
 def topapi():
-    adware = json.load(open("./output/api-not-match/Adware.json", "r"))["data"]
-    banking = json.load(open("./output/api-not-match/Banking.json", "r"))["data"]
-    bening = json.load(open("./output/api-not-match/Banking.json", "r"))["data"]
-    riskware = json.load(open("./output/api-not-match/riskware.json", "r"))["data"]
-    smsmalware = json.load(open("./output/api-not-match/SMS.json", "r"))["data"]
+    adware = json.load(open("output\\number-of-call-for-app\\Adware.json", "r"))["data"]
+    banking = json.load(open("output\\number-of-call-for-app\\Banking.json", "r"))["data"]
+    bening = json.load(open("output\\number-of-call-for-app\\Bening.json", "r"))["data"]
+    riskware = json.load(open("output\\number-of-call-for-app\\riskware.json", "r"))["data"]
+    smsmalware = json.load(open("output\\number-of-call-for-app\\smsmalware.json", "r"))["data"]
 
     top_api = []
 
-    for i in range(200):
-        top_api.append(adware[i]["name"])
-        top_api.append(banking[i]["name"])
-        top_api.append(bening[i]["name"])
-        top_api.append(riskware[i]["name"])
-        top_api.append(smsmalware[i]["name"])
-    
+    for i in range(1000):
+        if adware[i]["name"] not in top_api:
+            top_api.append(adware[i]["name"])
+        if banking[i]["name"] not in top_api:
+            top_api.append(adware[i]["name"])
+        if bening[i]["name"] not in top_api:
+            top_api.append(bening[i]["name"])
+        if riskware[i]["name"] not in top_api:
+            top_api.append(bening[i]["name"])
+        if smsmalware[i]["name"] not in top_api:
+            top_api.append(smsmalware[i]["name"])
+
     top_api.sort()
 
     top_api = {
-        "description": "Top 1000 api",
+        "description": "Top API in list adware, banking, bening, riskware and smsmalware",
         "count": len(top_api),
         "data": top_api
     }
-    
-    open("./output/top-api/top1000.json", "w").write(json.dumps(top_api, indent=4))
+    open("./output/number-of-call-for-app/top_api.json", "w").write(json.dumps(top_api, indent=4))
 
-    
-    print(top_api)
+def create_app_api():
+    api_dataset = json.load(open("output\\number-of-call-for-app\\top_api.json", "r"))["data"]
+
+    def create_row(file: str, label: str):
+        print(file)
+        content = json.load(open(file, "r"))["data"]
+        result = np.zeros((len(api_dataset)), dtype=int)
+
+        for method in content:
+            for api_call in method["api"]:
+                if api_call["full_api_call"] in api_dataset:
+                    result[api_dataset.index(api_call["full_api_call"])] = 1
+        return result
+
+    result = []
+    result.append(list(map(lambda x: create_row(x, "Adware"), list_files("./output/extract-data/Adware"))))
+    result.append(list(map(lambda x: create_row(x, "Banking"), list_files("./output/extract-data/Banking"))))
+    result.append(list(map(lambda x: create_row(x, "Bening"), list_files("./output/extract-data/Benign"))))
+    result.append(list(map(lambda x: create_row(x, "Riskware"), list_files("./output/extract-data/Riskware"))))
+    result.append(list(map(lambda x: create_row(x, "Smsmalware"), list_files("./output/extract-data/SMS"))))
+
+
+    matrix = list(reduce(lambda x, y: np.concatenate((x, y)), result))
+
+
+    matrix = pd.DataFrame(matrix, columns=api_dataset)
+    matrix.to_csv(path_or_buf="./output/app_api.csv")
+    pass
+
+def create_label():
+    result = []
+    for _ in list_files("./output/extract-data/Adware"):
+        result.append("Adware")
+    for _ in list_files("./output/extract-data/Banking"):
+        result.append("Banking")
+    for _ in list_files("./output/extract-data/Benign"):
+        result.append("Bening")
+    for _ in list_files("./output/extract-data/Riskware"):
+        result.append("Riskware")
+    for _ in list_files("./output/extract-data/SMS"):
+        result.append("Smsmalware")
+
+    pd.DataFrame(result, columns=["Label"]).to_csv("./output/label.csv")
+    pass
 
 def selection():
+    data = pd.read_csv("./output/app_api.csv", index_col=0, header=0).to_numpy()
+    label = pd.read_csv("./ouput/label.csv", index_col=0, header=0).to_numpy()
     pass
     
 if __name__ == '__main__':
@@ -184,5 +239,9 @@ if __name__ == '__main__':
         filter()
     if sys.argv[1] == 'topapi':
         topapi()
+    if sys.argv[1] == 'create':
+        create_app_api()
     if sys.argv[1] == 'selection':
         selection()
+    if sys.argv[1] == 'label':
+        create_label()
