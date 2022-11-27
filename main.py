@@ -15,7 +15,7 @@ from sklearn.feature_selection import RFE
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC
 from sklearn.metrics import accuracy_score, f1_score, recall_score, precision_score
-
+from multiprocess.pool import Pool
 
 def extract():
     def process_content(content: list[str]):
@@ -152,63 +152,22 @@ def filter():
     )
 
 def topapi():
-    adware = json.load(open("output\\number-of-call-for-app\\Adware.json", "r"))["data"]
-    banking = json.load(open("output\\number-of-call-for-app\\Banking.json", "r"))["data"]
-    bening = json.load(open("output\\number-of-call-for-app\\Bening.json", "r"))["data"]
-    riskware = json.load(open("output\\number-of-call-for-app\\riskware.json", "r"))["data"]
-    smsmalware = json.load(open("output\\number-of-call-for-app\\smsmalware.json", "r"))["data"]
+    ranking = json.load(open("./output/ranking/ranking.json", "r"))["data"]
+    for i in range(100, len(ranking), 100):
+        top_api = ranking[:i]
+        result = []
+        for element in top_api:
+            result.append(element["api"])
+        
+        result = {
+            "description": f"Top {i} api was ranked by sklearn RFE",
+            "count": len(result),
+            "data": result
+        }
 
-    top_api = []
+        open(f"output/ranking/top-api/ranking{i}.json", "w").write(json.dumps(result, indent=4))
+    
 
-    for i in range(1000):
-        if adware[i]["name"] not in top_api:
-            top_api.append(adware[i]["name"])
-        if banking[i]["name"] not in top_api:
-            top_api.append(adware[i]["name"])
-        if bening[i]["name"] not in top_api:
-            top_api.append(bening[i]["name"])
-        if riskware[i]["name"] not in top_api:
-            top_api.append(bening[i]["name"])
-        if smsmalware[i]["name"] not in top_api:
-            top_api.append(smsmalware[i]["name"])
-
-    top_api.sort()
-
-    top_api = {
-        "description": "Top API in list adware, banking, bening, riskware and smsmalware",
-        "count": len(top_api),
-        "data": top_api
-    }
-    open("./output/number-of-call-for-app/top_api.json", "w").write(json.dumps(top_api, indent=4))
-
-def create_app_api():
-    api_dataset = json.load(open("output\\number-of-call-for-app\\top_api.json", "r"))["data"]
-
-    def create_row(file: str, label: str):
-        print(file)
-        content = json.load(open(file, "r"))["data"]
-        result = np.zeros((len(api_dataset)), dtype=int)
-
-        for method in content:
-            for api_call in method["api"]:
-                if api_call["full_api_call"] in api_dataset:
-                    result[api_dataset.index(api_call["full_api_call"])] = 1
-        return result
-
-    result = []
-    result.append(list(map(lambda x: create_row(x, "Adware"), list_files("./output/extract-data/Adware"))))
-    result.append(list(map(lambda x: create_row(x, "Banking"), list_files("./output/extract-data/Banking"))))
-    result.append(list(map(lambda x: create_row(x, "Bening"), list_files("./output/extract-data/Benign"))))
-    result.append(list(map(lambda x: create_row(x, "Riskware"), list_files("./output/extract-data/Riskware"))))
-    result.append(list(map(lambda x: create_row(x, "Smsmalware"), list_files("./output/extract-data/SMS"))))
-
-
-    matrix = list(reduce(lambda x, y: np.concatenate((x, y)), result))
-
-
-    matrix = pd.DataFrame(matrix, columns=api_dataset)
-    matrix.to_csv(path_or_buf="./output/app_api.csv")
-    pass
 
 def create_label():
     result = []
@@ -222,6 +181,8 @@ def create_label():
         result.append("Riskware")
     for _ in list_files("./output/extract-data/SMS"):
         result.append("Smsmalware")
+    
+    return result
 
     pd.DataFrame(result, columns=["Label"]).to_csv("./output/label.csv")
     pass
@@ -259,6 +220,73 @@ def attach_ranking():
     
     open("./output/ranking/ranking.json", "w").write(json.dumps(result, indent=4))
 
+def create_app_api(api_dataset_path: str, save_path: str):
+    api_dataset = json.load(open(api_dataset_path, "r"))["data"]
+
+    def create_row(file: str, label: str):
+        print(file)
+        content = json.load(open(file, "r"))["data"]
+        result = np.zeros((len(api_dataset)), dtype=int)
+
+        for method in content:
+            for api_call in method["api"]:
+                if api_call["full_api_call"] in api_dataset:
+                    result[api_dataset.index(api_call["full_api_call"])] = 1
+        result = result.tolist()
+        result.append(label)
+        return result
+    
+    result = []
+    pool = Pool(10)
+    result.append(list(pool.map(lambda x: create_row(x, "Adware"), list_files("./output/extracted-data/Adware"))))
+    result.append(list(pool.map(lambda x: create_row(x, "Banking"), list_files("./output/extracted-data/Banking"))))
+    result.append(list(pool.map(lambda x: create_row(x, "Bening"), list_files("./output/extracted-data/Benign"))))
+    result.append(list(pool.map(lambda x: create_row(x, "Riskware"), list_files("./output/extracted-data/Riskware"))))
+    result.append(list(pool.map(lambda x: create_row(x, "Smsmalware"), list_files("./output/extracted-data/SMS"))))
+    matrix = list(reduce(lambda x, y: np.concatenate((x, y)), result))
+
+    api_dataset.append("Label")
+
+    pd.DataFrame(matrix, columns=api_dataset).to_csv(save_path)
+    return matrix
+
+def analysis_api():
+    def analysis(training_data_path: str, index):
+        print(training_data_path)
+
+        data_frame = pd.read_csv(training_data_path, index_col=0, header=0)
+        training_header = list(data_frame.columns)
+        training_header.remove("Label")
+
+        train_data = data_frame[training_header]
+        train_label = data_frame["Label"]
+
+        x_train, x_test, y_train, y_test = train_test_split(train_data, train_label, test_size=0.3, random_state=50)
+
+        model = SVC(kernel="linear")
+        model.fit(x_train, y_train)
+        predict = model.predict(x_test)
+
+        return {
+            "index": index,
+            "accuracy": accuracy_score(y_test, predict),
+            "f1": f1_score(y_test, predict, average='weighted'),
+            "recall": recall_score(y_test, predict, average='weighted'),
+            "precision": precision_score(y_test, predict, average='weighted')
+        }
+
+    result = []
+    for i in range(100, 2701, 100):
+        result.append(analysis(f"output\\analysis\\training_data\\training_data_{i}_api.csv", i))
+
+    result = {
+        "description": "Training result",
+        "data": result
+    }
+
+    open("output\\analysis\\training_result.json", "w").write(json.dumps(result, indent=4))
+
+
     
 if __name__ == '__main__':
     if (len(sys.argv) > 1):
@@ -272,13 +300,10 @@ if __name__ == '__main__':
             filter()
         if sys.argv[1] == 'topapi':
             topapi()
-        if sys.argv[1] == 'create':
-            create_app_api()
         if sys.argv[1] == 'ranking':
             ranking()
-        if sys.argv[1] == 'label':
-            create_label()
         if sys.argv[1] == 'attach_ranking':
             attach_ranking()
+        if sys.argv[1] == 'analysis':
+            analysis_api()
         exit(0)
-
