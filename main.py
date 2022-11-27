@@ -9,6 +9,12 @@ from Libraries.Files import rmtree, list_files
 from Libraries.ApkTool import decompile
 from Libraries.Smali import list_smali_files
 from Libraries.Csv import save_int_csv
+from Libraries.Pkl import save_pkl, load_pkl
+from sklearn.model_selection import train_test_split
+from sklearn.feature_selection import RFE
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.svm import SVC
+from sklearn.metrics import accuracy_score, f1_score, recall_score, precision_score
 
 
 def extract():
@@ -220,28 +226,59 @@ def create_label():
     pd.DataFrame(result, columns=["Label"]).to_csv("./output/label.csv")
     pass
 
-def selection():
+def ranking():
     data = pd.read_csv("./output/app_api.csv", index_col=0, header=0).to_numpy()
-    label = pd.read_csv("./ouput/label.csv", index_col=0, header=0).to_numpy()
-    pass
+    label = pd.read_csv("./output/label.csv", index_col=0, header=0).to_numpy()
+    x_train, x_test, y_train, y_test = train_test_split(data, label, test_size=0.3, random_state=42)
+    
+    model = SVC(kernel="linear")
+    selector = RFE(estimator=model, n_features_to_select=1, step=1, verbose=1)
+    print("fit")
+    selector.fit(x_train, y_train.ravel())
+    save_pkl("./output/ranking1800.pkl", selector)
+
+def attach_ranking():
+    result = []
+    api_dataset = json.load(open("output/number-of-call-for-app/top_api.json", "r"))["data"]
+    ranking = load_pkl("output/ranking/ranking.pkl").ranking_
+
+    for i in range(len(api_dataset)):
+        ele = dict()
+        ele["api"] = api_dataset[i]
+        ele["rank"] = int(ranking[i])
+        result.append(ele)
+    
+    result.sort(key=lambda x: x["rank"], reverse=False)
+
+    result = {
+        "description": "API Dataset ranking with sklearn RFE",
+        "count": len(result),
+        "data": result
+    }
+
+    
+    open("./output/ranking/ranking.json", "w").write(json.dumps(result, indent=4))
+
     
 if __name__ == '__main__':
-    if (len(sys.argv) == 1):
-        print('missing argument')
+    if (len(sys.argv) > 1):
+        if sys.argv[1] == 'extract':
+            extract()
+        if sys.argv[1] == 'total':
+            total()
+        if sys.argv[1] == 'transform':
+            transform()
+        if sys.argv[1] == 'filter':
+            filter()
+        if sys.argv[1] == 'topapi':
+            topapi()
+        if sys.argv[1] == 'create':
+            create_app_api()
+        if sys.argv[1] == 'ranking':
+            ranking()
+        if sys.argv[1] == 'label':
+            create_label()
+        if sys.argv[1] == 'attach_ranking':
+            attach_ranking()
         exit(0)
-    if sys.argv[1] == 'extract':
-        extract()
-    if sys.argv[1] == 'total':
-        total()
-    if sys.argv[1] == 'transform':
-        transform()
-    if sys.argv[1] == 'filter':
-        filter()
-    if sys.argv[1] == 'topapi':
-        topapi()
-    if sys.argv[1] == 'create':
-        create_app_api()
-    if sys.argv[1] == 'selection':
-        selection()
-    if sys.argv[1] == 'label':
-        create_label()
+
