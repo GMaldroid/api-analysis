@@ -13,9 +13,11 @@ from Libraries.Pkl import save_pkl, load_pkl
 from sklearn.model_selection import train_test_split
 from sklearn.feature_selection import RFE
 from sklearn.neighbors import KNeighborsClassifier
+from sklearn.tree import DecisionTreeClassifier
 from sklearn.svm import SVC
 from sklearn.metrics import accuracy_score, f1_score, recall_score, precision_score
 from multiprocess.pool import Pool
+from matplotlib import pyplot as plt
 
 def extract():
     def process_content(content: list[str]):
@@ -263,7 +265,7 @@ def analysis_api():
 
         x_train, x_test, y_train, y_test = train_test_split(train_data, train_label, test_size=0.3, random_state=50)
 
-        model = SVC(kernel="linear")
+        model = KNeighborsClassifier(n_neighbors=5)
         model.fit(x_train, y_train)
         predict = model.predict(x_test)
 
@@ -284,8 +286,29 @@ def analysis_api():
         "data": result
     }
 
-    open("output\\analysis\\training_result.json", "w").write(json.dumps(result, indent=4))
+    open("output\\analysis\\k_neighbor_5.json", "w").write(json.dumps(result, indent=4))
 
+def draw():
+    training_data = json.load(open("output\\analysis\\decision-tree-default.json", "r"))["data"]
+    x = []
+    accuracy = []
+    recall = []
+    f1 = []
+    precision = []
+    for ele in training_data:
+        x.append(ele["index"])
+        accuracy.append(ele["accuracy"] * 100)
+        recall.append(ele["recall"] * 100)
+        f1.append(ele["f1"] * 100)
+        precision.append(ele["precision"] * 100)
+    
+    plt.plot(x, accuracy)
+    plt.xlabel("number of api")
+    plt.ylabel("percent")
+    plt.suptitle("decision tree accuracy")
+    plt.savefig("output/analysis/images/decision_tree-accuracy.png")
+    plt.show()
+    pass
 
     
 if __name__ == '__main__':
@@ -306,4 +329,6 @@ if __name__ == '__main__':
             attach_ranking()
         if sys.argv[1] == 'analysis':
             analysis_api()
+        if sys.argv[1] == "draw":
+            draw()
         exit(0)
