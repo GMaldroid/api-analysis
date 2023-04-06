@@ -3,21 +3,24 @@ import os
 import json
 import numpy as np
 import pandas as pd
+import polars as pl
 from functools import reduce
 from Libraries.AndroidAPI import AndroidAPI
 from Libraries.Files import rmtree, list_files
 from Libraries.ApkTool import decompile
 from Libraries.Smali import list_smali_files
-from Libraries.Csv import save_int_csv
+from Libraries.Csv import save_int_csv, save_float_csv, load_int_csv
 from Libraries.Pkl import save_pkl, load_pkl
 from sklearn.model_selection import train_test_split
 from sklearn.feature_selection import RFE
+from sklearn.decomposition import PCA
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.svm import SVC
 from sklearn.metrics import accuracy_score, f1_score, recall_score, precision_score
 from multiprocess.pool import Pool
 from matplotlib import pyplot as plt
+from numba import jit, cuda
 
 def extract():
     def process_content(content: list[str]):
@@ -200,6 +203,19 @@ def ranking():
     selector.fit(x_train, y_train.ravel())
     save_pkl("./output/ranking1800.pkl", selector)
 
+def ranking_pca():
+    data_frame = pd.read_csv("./output/app_api_label.csv", index_col=0, header=0)
+    training_header = list(data_frame.columns)
+    training_header.remove("Label")
+
+    train_data = data_frame[training_header]    
+    pca = PCA()
+    pca.fit(train_data)
+
+    save_float_csv("./output/full.csv", pca.components_)
+
+    pass
+
 def attach_ranking():
     result = []
     api_dataset = json.load(open("output/number-of-call-for-app/top_api.json", "r"))["data"]
@@ -240,17 +256,114 @@ def create_app_api(api_dataset_path: str, save_path: str):
     
     result = []
     pool = Pool(10)
-    result.append(list(pool.map(lambda x: create_row(x, "Adware"), list_files("./output/extracted-data/Adware"))))
-    result.append(list(pool.map(lambda x: create_row(x, "Banking"), list_files("./output/extracted-data/Banking"))))
-    result.append(list(pool.map(lambda x: create_row(x, "Bening"), list_files("./output/extracted-data/Benign"))))
-    result.append(list(pool.map(lambda x: create_row(x, "Riskware"), list_files("./output/extracted-data/Riskware"))))
-    result.append(list(pool.map(lambda x: create_row(x, "Smsmalware"), list_files("./output/extracted-data/SMS"))))
+    result.append(list(pool.map(lambda x: create_row(x, "Adware"), list_files("./output/extracted-data/Adware")[:20])))
+    result.append(list(pool.map(lambda x: create_row(x, "Banking"), list_files("./output/extracted-data/Banking")[:20])))
+    result.append(list(pool.map(lambda x: create_row(x, "Bening"), list_files("./output/extracted-data/Benign")[:20])))
+    result.append(list(pool.map(lambda x: create_row(x, "Riskware"), list_files("./output/extracted-data/Riskware")[:20])))
+    result.append(list(pool.map(lambda x: create_row(x, "Smsmalware"), list_files("./output/extracted-data/SMS")[:20])))
     matrix = list(reduce(lambda x, y: np.concatenate((x, y)), result))
 
     api_dataset.append("Label")
 
     pd.DataFrame(matrix, columns=api_dataset).to_csv(save_path)
     return matrix
+
+def create_invoke():
+    api_dataset = json.load(open("output\\ranking\\top-api\\ranking400.json", "r"))["data"]
+    invoke_matrix = np.zeros((len(api_dataset), len(api_dataset)), dtype=np.int32)
+
+    def process(app):
+        print(app)
+        invoke_static = set()
+        invoke_virtual = set()
+        invoke_direct = set()
+        invoke_super = set()
+        invoke_interface = set()
+        data = json.load(open(app, "r"))["data"]
+        for method in data:
+            apis = method["api"]
+            for api in apis:
+                if api["full_api_call"] in api_dataset:
+                    invoke = api["invoke"]
+                    if invoke == 'invoke-static':
+                        invoke_static.add(api_dataset.index(api["full_api_call"]))
+                    elif invoke == 'invoke-virtual':
+                        invoke_virtual.add(api_dataset.index(api["full_api_call"]))
+                    elif invoke == 'invoke-direct':
+                        invoke_direct.add(api_dataset.index(api["full_api_call"]))
+                    elif invoke == 'invoke-super':
+                        invoke_super.add(api_dataset.index(api["full_api_call"]))
+                    elif invoke == 'invoke-interface':
+                        invoke_interface.add(api_dataset.index(api["full_api_call"]))
+        all_type = []
+        all_type.append(invoke_static)
+        all_type.append(invoke_virtual)
+        all_type.append(invoke_direct)
+        all_type.append(invoke_super)
+        all_type.append(invoke_interface)
+
+        return all_type
+
+    result = []
+    result = np.concatenate((result, list_files("./output/extracted-data/Adware")))
+    result = np.concatenate((result, list_files("./output/extracted-data/Banking")))
+    result = np.concatenate((result, list_files("./output/extracted-data/Benign")))
+    result = np.concatenate((result, list_files("./output/extracted-data/Riskware")))
+    result = np.concatenate((result, list_files("./output/extracted-data/SMS")))
+    apps = list(map(process, result))
+    for i, app in enumerate(apps):
+        print(f'process {i}')
+        for type in app:
+            type = list(type)
+            for i in range(len(type)):
+                for j in range(i, len(type)):
+                    invoke_matrix[type[i]][type[j]] = 1
+    
+    pd.DataFrame(invoke_matrix, index=api_dataset, columns=api_dataset).to_csv('./output/invoke.csv')
+
+
+
+def create_method():
+    api_dataset = json.load(open("output\\ranking\\top-api\\ranking400.json", "r"))["data"]
+    method_matrix = np.zeros((len(api_dataset), len(api_dataset)), dtype=np.int32)
+
+    def process(app: str):
+        print(app)
+
+        in_app = []
+        data = json.load(open(app, "r"))["data"]
+        for method in data:
+            buffer = []
+            apis = method["api"]
+            for api in apis:
+                if api["full_api_call"] in api_dataset:
+                    buffer.append(api_dataset.index(api["full_api_call"]))
+            in_app.append(buffer)
+        return in_app
+
+    result = []
+    result = np.concatenate((result, list_files("./output/extracted-data/Adware")))
+    result = np.concatenate((result, list_files("./output/extracted-data/Banking")))
+    result = np.concatenate((result, list_files("./output/extracted-data/Benign")))
+    result = np.concatenate((result, list_files("./output/extracted-data/Riskware")))
+    result = np.concatenate((result, list_files("./output/extracted-data/SMS")))
+    pool = Pool(5)
+    apps = list(pool.map(process, result))
+    for i, app in enumerate(apps):
+        print(f"process app {i}")
+        for buffer in app:
+            for i in range(len(buffer)):
+                for j in range(i, len(buffer)):
+                    method_matrix[buffer[i]][buffer[j]] = 1
+
+
+    save_int_csv("./output/method.csv", method_matrix)
+    pass
+def create_package():
+    api_dataset = json.load(open("output\\ranking\\top-api\\ranking400.json", "r"))["data"]
+    api_dataset.sort()
+    print(api_dataset)
+    
 
 def analysis_api():
     def analysis(training_data_path: str, index):
@@ -310,6 +423,56 @@ def draw():
     plt.show()
     pass
 
+def for_quan():
+    
+    pass
+
+def app_api_split():
+    app_api_dp = pd.read_csv("output\\app_api_label_400.csv", index_col=0, header=0)
+    app_api = app_api_dp.to_numpy()
+
+    result = app_api[0:1000]
+
+    for i, app in enumerate(app_api):
+        if app[400] == 'Banking':
+            result = np.concatenate((result, app_api[i:i+1000]))
+            break
+
+    for i, app in enumerate(app_api):
+        if app[400] == 'Bening':
+            result = np.concatenate((result, app_api[i:i+1000]))
+            break
+    
+    for i, app in enumerate(app_api):
+        if app[400] == 'Riskware':
+            result = np.concatenate((result, app_api[i:i+1000]))
+            break
+
+    for i, app in enumerate(app_api):
+        if app[400] == 'Smsmalware':
+            result = np.concatenate((result, app_api[i:i+1000]))
+            break
+    
+    print(result.shape)
+    pd.DataFrame(result, columns=app_api_dp.columns).to_csv("output\\5000app\\app_api_label_5000_app.csv")
+    pass
+
+def app_api_split_test():
+    app_api_dp = pd.read_csv("output\\app_api_label_400.csv", index_col=0, header=0)
+    adware = app_api_dp[app_api_dp["Label"] == "Adware"]
+    banking = app_api_dp[app_api_dp["Label"] == "Banking"]
+    benign = app_api_dp[app_api_dp["Label"] == "Bening"]
+    riskware = app_api_dp[app_api_dp["Label"] == "Riskware"]
+    smsmalware = app_api_dp[app_api_dp["Label"] == "Smsmalware"]
+
+    adware = adware.iloc[1000:,:]
+    banking = banking.iloc[1000:,:]
+    benign = benign.iloc[1000:,:]
+    riskware = riskware.iloc[1000:,:]
+    smsmalware = smsmalware.iloc[1000:,:]
+
+    result = pd.concat([adware, banking, benign, riskware, smsmalware])
+    pd.DataFrame(result.to_numpy(), columns=app_api_dp.columns).to_csv("output\\5000app\\app_api_label_test_for_5000_app_training.csv")
     
 if __name__ == '__main__':
     if (len(sys.argv) > 1):
@@ -325,10 +488,26 @@ if __name__ == '__main__':
             topapi()
         if sys.argv[1] == 'ranking':
             ranking()
+        if sys.argv[1] == 'ranking_pca':
+            ranking_pca()
         if sys.argv[1] == 'attach_ranking':
             attach_ranking()
         if sys.argv[1] == 'analysis':
             analysis_api()
+        if sys.argv[1] == 'create-method':
+            create_method()
+        if sys.argv[1] == 'create-invoke':
+            create_invoke()
+        if sys.argv[1] == 'create-package':
+            create_package()
         if sys.argv[1] == "draw":
             draw()
+        if sys.argv[1] == 'for-quan':
+            for_quan()
+        if sys.argv[1] == 'app-api-split':
+            app_api_split()
+        if sys.argv[1] == 'app-api-split-test':
+            app_api_split_test()
         exit(0)
+    df = pl.read_csv("output\\app_api_label_400.csv")
+    print(df.select([pl.col("Label").sort()]))
