@@ -361,8 +361,16 @@ def create_method():
     pass
 def create_package():
     api_dataset = json.load(open("output\\ranking\\top-api\\ranking400.json", "r"))["data"]
-    api_dataset.sort()
-    print(api_dataset)
+    package_matrix = np.zeros((len(api_dataset), len(api_dataset)), dtype=np.int32)
+    for api_i in range(len(api_dataset)):
+        package_matrix[api_i][api_i] = 1
+        for api_j in range(api_i + 1, len(api_dataset)):
+            if api_dataset[api_i][:api_dataset[api_i].index(';->')] == api_dataset[api_j][
+                                                                        :api_dataset[api_j].index(';->')]:
+                package_matrix[api_i][api_j] = 1
+                package_matrix[api_j][api_i] = 1
+    pd.DataFrame(package_matrix, index=api_dataset, columns=api_dataset).to_csv("output/test_package.csv")
+
     
 
 def analysis_api():
