@@ -2,7 +2,7 @@ import os
 import stat
 
 def list_files(path: str):
-    return [path + "\\" + f for f in os.listdir(path)]
+    return [path + "/" + f for f in os.listdir(path)]
 
 def rmtree(path: str):
     for root, dirs, files in os.walk(path, topdown=False):
