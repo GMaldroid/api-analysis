@@ -3,7 +3,7 @@ import os
 import json
 import numpy as np
 import pandas as pd
-import polars as pl
+from collections import Counter
 from functools import reduce
 from Libraries.AndroidAPI import AndroidAPI
 from Libraries.Files import rmtree, list_files
@@ -20,7 +20,6 @@ from sklearn.svm import SVC
 from sklearn.metrics import accuracy_score, f1_score, recall_score, precision_score
 from multiprocess.pool import Pool
 from matplotlib import pyplot as plt
-from numba import jit, cuda
 
 def extract():
     def process_content(content: list[str]):
@@ -81,6 +80,7 @@ def extract():
 
 def total():
     def process_content(result, file):
+        print(file)
         content = json.load(open(file))
         data = content["data"]
         list_api_call = []
@@ -98,11 +98,11 @@ def total():
 
         return result
 
-    contents = dict(reduce(process_content, list_files("./output/extract-data/SMS"), dict()))
-    open("./output/total-call/SMS.json", "w").write(json.dumps(contents, indent=4))
+    contents = dict(reduce(process_content, list_files("D:/NCKH-2022/repo/Train_1500/input/SMS_300"), dict()))
+    open("./output/do-an/total-call/format1/SMS_300.json", "w").write(json.dumps(contents, indent=4))
 
 def transform():
-    data = json.load(open("output/total-call/SMS.json", "r"))
+    data = json.load(open("output/do-an/total-call/format1/SMS.json", "r"))
     result = list()
     for key in data.keys():
         result.append({
@@ -114,15 +114,44 @@ def transform():
         "type": "smsmalware",
         "data": result
     }
-    open("./output/number-of-call-for-app/smsmalware.json", "w").write(json.dumps(result, indent=4))
+    open("./output/do-an/total-call/format2/SMS.json", "w").write(json.dumps(result, indent=4))
     pass
 
+def group():
+    adware = json.load(open("output/do-an/total-call/format2/Adware.json", "r"))
+    banking = json.load(open("output/do-an/total-call/format2/Banking.json", "r"))
+    benign = json.load(open("output/do-an/total-call/format2/Bening.json", "r"))
+    riskware = json.load(open("output/do-an/total-call/format2/Riskware.json", "r"))
+    sms = json.load(open("output/do-an/total-call/format2/SMS.json", "r"))
+
+    for top in range(10, 310, 10):
+        result = set()
+
+        for api in adware["data"][:top]:
+            result.add(api["name"])
+        for api in banking["data"][:top]:
+            result.add(api["name"])
+        for api in benign["data"][:top]:
+            result.add(api["name"])
+        for api in riskware["data"][:top]:
+            result.add(api["name"])
+        for api in sms["data"][:top]:
+            result.add(api["name"])
+        
+        result = {
+            "description": f"set of top {top} api from adware, banking, benign, riskware, sms",
+            "count": len(result),
+            "data": list(result)
+        }
+        
+        open(f"./output/do-an/top-api/top-{top}.json", "w").write(json.dumps(result, indent=4))
+
 def filter():
-    adware = json.load(open("./output/number-of-call/Adware.json", "r"))
-    banking = json.load(open("./output/number-of-call/Banking.json", "r"))
-    benign = json.load(open("./output/number-of-call/Benign.json", "r"))
-    riskware = json.load(open("./output/number-of-call/Riskware.json", "r"))
-    sms = json.load(open("./output/number-of-call/SMS.json", "r"))
+    adware = json.load(open("output/statistical-api-call/Adware.json", "r"))
+    banking = json.load(open("./output/statistical-api-call/Banking.json", "r"))
+    benign = json.load(open("./output/statistical-api-call/Benign.json", "r"))
+    riskware = json.load(open("./output/statistical-api-call/riskware.json", "r"))
+    sms = json.load(open("./output/statistical-api-call/smsmalware.json", "r"))
 
     adware_name = [f["name"] for f in adware["data"]]
     banking_name = [f["name"] for f in banking["data"]]
@@ -136,7 +165,6 @@ def filter():
     riskware_result = []
     sms_result = []
 
-    print("riskware")
     sms_nm = []
     for api in sms_name:
         if (api not in adware_name) and (api not in banking_name) and (api not in benign_name) and (api not in riskware_name):
@@ -238,38 +266,41 @@ def attach_ranking():
     
     open("./output/ranking/ranking.json", "w").write(json.dumps(result, indent=4))
 
-def create_app_api(api_dataset_path: str, save_path: str):
-    api_dataset = json.load(open(api_dataset_path, "r"))["data"]
+def create_app_api():
+    for top in range(10, 310, 10):
+        api_dataset_path = f"output/do-an/top-api/top-{top}.json"
+        save_path = f"output/do-an/matrix/{top}/app-api.csv"
 
-    def create_row(file: str, label: str):
-        print(file)
-        content = json.load(open(file, "r"))["data"]
-        result = np.zeros((len(api_dataset)), dtype=int)
+        api_dataset = json.load(open(api_dataset_path, "r"))["data"]
 
-        for method in content:
-            for api_call in method["api"]:
-                if api_call["full_api_call"] in api_dataset:
-                    result[api_dataset.index(api_call["full_api_call"])] = 1
-        result = result.tolist()
-        result.append(label)
-        return result
-    
-    result = []
-    pool = Pool(10)
-    result.append(list(pool.map(lambda x: create_row(x, "Adware"), list_files("./output/extracted-data/Adware")[:20])))
-    result.append(list(pool.map(lambda x: create_row(x, "Banking"), list_files("./output/extracted-data/Banking")[:20])))
-    result.append(list(pool.map(lambda x: create_row(x, "Bening"), list_files("./output/extracted-data/Benign")[:20])))
-    result.append(list(pool.map(lambda x: create_row(x, "Riskware"), list_files("./output/extracted-data/Riskware")[:20])))
-    result.append(list(pool.map(lambda x: create_row(x, "Smsmalware"), list_files("./output/extracted-data/SMS")[:20])))
-    matrix = list(reduce(lambda x, y: np.concatenate((x, y)), result))
+        def create_row(file: str, label: str):
+            print(file)
+            content = json.load(open(file, "r"))["data"]
+            result = np.zeros((len(api_dataset)), dtype=int)
 
-    api_dataset.append("Label")
+            for method in content:
+                for api_call in method["api"]:
+                    if api_call["full_api_call"] in api_dataset:
+                        result[api_dataset.index(api_call["full_api_call"])] = 1
+            result = result.tolist()
+            result.append(label)
+            return result
+        
+        result = []
+        pool = Pool(10)
+        result.append(list(pool.map(lambda x: create_row(x, "Adware"), list_files("D:/NCKH-2022/repo/Train_1500/input/Adware_300"))))
+        result.append(list(pool.map(lambda x: create_row(x, "Banking"), list_files("D:/NCKH-2022/repo/Train_1500/input/Banking_300"))))
+        result.append(list(pool.map(lambda x: create_row(x, "Bening"), list_files("D:/NCKH-2022/repo/Train_1500/input/Benign_300"))))
+        result.append(list(pool.map(lambda x: create_row(x, "Riskware"), list_files("D:/NCKH-2022/repo/Train_1500/input/Riskware_300"))))
+        result.append(list(pool.map(lambda x: create_row(x, "Smsmalware"), list_files("D:/NCKH-2022/repo/Train_1500/input/SMS_300"))))
+        matrix = list(reduce(lambda x, y: np.concatenate((x, y)), result))
 
-    pd.DataFrame(matrix, columns=api_dataset).to_csv(save_path)
-    return matrix
+        api_dataset.append("Label")
+
+        pd.DataFrame(matrix, columns=api_dataset).to_csv(save_path)
 
 def create_invoke():
-    api_dataset = json.load(open("output\\ranking\\top-api\\ranking400.json", "r"))["data"]
+    api_dataset = json.load(open("output/do-an/top-api/top-200.json", "r"))["data"]
     invoke_matrix = np.zeros((len(api_dataset), len(api_dataset)), dtype=np.int32)
 
     def process(app):
@@ -305,12 +336,13 @@ def create_invoke():
         return all_type
 
     result = []
-    result = np.concatenate((result, list_files("./output/extracted-data/Adware")))
-    result = np.concatenate((result, list_files("./output/extracted-data/Banking")))
-    result = np.concatenate((result, list_files("./output/extracted-data/Benign")))
-    result = np.concatenate((result, list_files("./output/extracted-data/Riskware")))
-    result = np.concatenate((result, list_files("./output/extracted-data/SMS")))
-    apps = list(map(process, result))
+    result = np.concatenate((result, list_files("D:/NCKH-2022/repo/Train_1500/input/Adware_300")))
+    result = np.concatenate((result, list_files("D:/NCKH-2022/repo/Train_1500/input/Banking_300")))
+    result = np.concatenate((result, list_files("D:/NCKH-2022/repo/Train_1500/input/Benign_300")))
+    result = np.concatenate((result, list_files("D:/NCKH-2022/repo/Train_1500/input/Riskware_300")))
+    result = np.concatenate((result, list_files("D:/NCKH-2022/repo/Train_1500/input/SMS_300")))
+    pool = Pool(10)
+    apps = list(pool.map(process, result))
     for i, app in enumerate(apps):
         print(f'process {i}')
         for type in app:
@@ -319,12 +351,12 @@ def create_invoke():
                 for j in range(i, len(type)):
                     invoke_matrix[type[i]][type[j]] = 1
     
-    pd.DataFrame(invoke_matrix, index=api_dataset, columns=api_dataset).to_csv('./output/invoke.csv')
+    pd.DataFrame(invoke_matrix, index=api_dataset, columns=api_dataset).to_csv('output/do-an/matrix/200/invoke.csv')
 
 
 
 def create_method():
-    api_dataset = json.load(open("output\\ranking\\top-api\\ranking400.json", "r"))["data"]
+    api_dataset = json.load(open("output/do-an/top-api/top-200.json", "r"))["data"]
     method_matrix = np.zeros((len(api_dataset), len(api_dataset)), dtype=np.int32)
 
     def process(app: str):
@@ -342,12 +374,12 @@ def create_method():
         return in_app
 
     result = []
-    result = np.concatenate((result, list_files("./output/extracted-data/Adware")))
-    result = np.concatenate((result, list_files("./output/extracted-data/Banking")))
-    result = np.concatenate((result, list_files("./output/extracted-data/Benign")))
-    result = np.concatenate((result, list_files("./output/extracted-data/Riskware")))
-    result = np.concatenate((result, list_files("./output/extracted-data/SMS")))
-    pool = Pool(5)
+    result = np.concatenate((result, list_files("D:/NCKH-2022/repo/Train_1500/input/Adware_300")))
+    result = np.concatenate((result, list_files("D:/NCKH-2022/repo/Train_1500/input/Banking_300")))
+    result = np.concatenate((result, list_files("D:/NCKH-2022/repo/Train_1500/input/Benign_300")))
+    result = np.concatenate((result, list_files("D:/NCKH-2022/repo/Train_1500/input/Riskware_300")))
+    result = np.concatenate((result, list_files("D:/NCKH-2022/repo/Train_1500/input/SMS_300")))
+    pool = Pool(10)
     apps = list(pool.map(process, result))
     for i, app in enumerate(apps):
         print(f"process app {i}")
@@ -357,10 +389,10 @@ def create_method():
                     method_matrix[buffer[i]][buffer[j]] = 1
 
 
-    save_int_csv("./output/method.csv", method_matrix)
-    pass
+    pd.DataFrame(method_matrix, index=api_dataset, columns=api_dataset).to_csv('output/do-an/matrix/200/method.csv')
+
 def create_package():
-    api_dataset = json.load(open("output\\ranking\\top-api\\ranking400.json", "r"))["data"]
+    api_dataset = json.load(open("output/do-an/top-api/top-200.json", "r"))["data"]
     package_matrix = np.zeros((len(api_dataset), len(api_dataset)), dtype=np.int32)
     for api_i in range(len(api_dataset)):
         package_matrix[api_i][api_i] = 1
@@ -369,7 +401,7 @@ def create_package():
                                                                         :api_dataset[api_j].index(';->')]:
                 package_matrix[api_i][api_j] = 1
                 package_matrix[api_j][api_i] = 1
-    pd.DataFrame(package_matrix, index=api_dataset, columns=api_dataset).to_csv("output/test_package.csv")
+    pd.DataFrame(package_matrix, index=api_dataset, columns=api_dataset).to_csv("output/do-an/matrix/200/package.csv")
 
     
 
@@ -386,7 +418,7 @@ def analysis_api():
 
         x_train, x_test, y_train, y_test = train_test_split(train_data, train_label, test_size=0.3, random_state=50)
 
-        model = KNeighborsClassifier(n_neighbors=5)
+        model = SVC(kernel="sigmoid")
         model.fit(x_train, y_train)
         predict = model.predict(x_test)
 
@@ -399,18 +431,48 @@ def analysis_api():
         }
 
     result = []
-    for i in range(100, 2701, 100):
-        result.append(analysis(f"output\\analysis\\training_data\\training_data_{i}_api.csv", i))
+    for i in range(10, 310, 10):
+        result.append(analysis(f"output/do-an/matrix/{i}/app-api.csv", i))
 
     result = {
         "description": "Training result",
         "data": result
     }
 
-    open("output\\analysis\\k_neighbor_5.json", "w").write(json.dumps(result, indent=4))
+    open("output/do-an/analysis/svc-sigmoid.json", "w").write(json.dumps(result, indent=4))
+
+def agv():
+    tree = json.load(open("output/do-an/analysis/svc-sigmoid.json", "r"))["data"]
+    knb = json.load(open("output/do-an/analysis/svc-sigmoid.json", "r"))["data"]
+    liner = json.load(open("output/do-an/analysis/svc-sigmoid.json", "r"))["data"]
+    poly = json.load(open("output/do-an/analysis/svc-sigmoid.json", "r"))["data"]
+    rbf = json.load(open("output/do-an/analysis/svc-sigmoid.json", "r"))["data"]
+    sigmoid = json.load(open("output/do-an/analysis/svc-sigmoid.json", "r"))["data"]
+
+    result = []
+    for i in  range(30):
+        acc = (tree[i]["accuracy"] + knb[i]["accuracy"] + liner[i]["accuracy"] + poly[i]["accuracy"] + rbf[i]["accuracy"] + sigmoid[i]["accuracy"]) / 5
+        f1 = (tree[i]["f1"] + knb[i]["f1"] + liner[i]["f1"] + poly[i]["f1"] + rbf[i]["f1"] + sigmoid[i]["f1"]) / 5
+        recall = (tree[i]["recall"] + knb[i]["recall"] + liner[i]["recall"] + poly[i]["recall"] + rbf[i]["recall"] + sigmoid[i]["recall"]) / 5
+        precision = (tree[i]["precision"] + knb[i]["precision"] + liner[i]["precision"] + poly[i]["precision"] + rbf[i]["precision"] + sigmoid[i]["precision"]) / 5
+
+        result.append({
+            "index": tree[i]["index"],
+            "accuracy": acc,
+            "f1": f1,
+            "recall": recall,
+            "precision": precision
+        })
+    
+    result = {
+        "description": "avg calc",
+        "data": result
+    }
+
+    open("output/do-an/analysis/avg.json", "w").write(json.dumps(result, indent=4))
 
 def draw():
-    training_data = json.load(open("output\\analysis\\decision-tree-default.json", "r"))["data"]
+    training_data = json.load(open("output/do-an/analysis/svc-sigmoid.json", "r"))["data"]
     x = []
     accuracy = []
     recall = []
@@ -423,11 +485,28 @@ def draw():
         f1.append(ele["f1"] * 100)
         precision.append(ele["precision"] * 100)
     
-    plt.plot(x, accuracy)
-    plt.xlabel("number of api")
-    plt.ylabel("percent")
-    plt.suptitle("decision tree accuracy")
-    plt.savefig("output/analysis/images/decision_tree-accuracy.png")
+    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2)
+    ax1.plot(x, accuracy)
+    ax1.set_title("accuracy")
+    ax1.set_xlabel("apis")
+    ax1.set_ylabel("percent")
+
+    ax2.plot(x, recall)
+    ax2.set_title("recall")
+    ax2.set_xlabel("apis")
+    ax2.set_ylabel("percent")
+
+    ax3.plot(x, f1)
+    ax3.set_title("f1")
+    ax3.set_xlabel("apis")
+    ax3.set_ylabel("percent")
+
+    ax4.plot(x, precision)
+    ax4.set_title("precision")
+    ax4.set_xlabel("apis")
+    ax4.set_ylabel("percent")
+
+    plt.suptitle("svc sigmoid")
     plt.show()
     pass
 
@@ -473,14 +552,14 @@ def app_api_split_test():
     riskware = app_api_dp[app_api_dp["Label"] == "Riskware"]
     smsmalware = app_api_dp[app_api_dp["Label"] == "Smsmalware"]
 
-    adware = adware.iloc[1000:,:]
-    banking = banking.iloc[1000:,:]
-    benign = benign.iloc[1000:,:]
-    riskware = riskware.iloc[1000:,:]
-    smsmalware = smsmalware.iloc[1000:,:]
+    adware = adware.iloc[600:,:]
+    banking = banking.iloc[600:,:]
+    benign = benign.iloc[600:,:]
+    riskware = riskware.iloc[600:,:]
+    smsmalware = smsmalware.iloc[600:,:]
 
     result = pd.concat([adware, banking, benign, riskware, smsmalware])
-    pd.DataFrame(result.to_numpy(), columns=app_api_dp.columns).to_csv("output\\5000app\\app_api_label_test_for_5000_app_training.csv")
+    pd.DataFrame(result.to_numpy(), columns=app_api_dp.columns).to_csv("output\\3000app\\test.csv")
     
 if __name__ == '__main__':
     if (len(sys.argv) > 1):
@@ -490,6 +569,8 @@ if __name__ == '__main__':
             total()
         if sys.argv[1] == 'transform':
             transform()
+        if sys.argv[1] == 'group':
+            group()
         if sys.argv[1] == 'filter':
             filter()
         if sys.argv[1] == 'topapi':
@@ -500,8 +581,12 @@ if __name__ == '__main__':
             ranking_pca()
         if sys.argv[1] == 'attach_ranking':
             attach_ranking()
+        if sys.argv[1] == 'agv':
+            agv()
         if sys.argv[1] == 'analysis':
             analysis_api()
+        if sys.argv[1] == 'create-app-api':
+            create_app_api()
         if sys.argv[1] == 'create-method':
             create_method()
         if sys.argv[1] == 'create-invoke':
@@ -517,5 +602,13 @@ if __name__ == '__main__':
         if sys.argv[1] == 'app-api-split-test':
             app_api_split_test()
         exit(0)
-    df = pl.read_csv("output\\app_api_label_400.csv")
-    print(df.select([pl.col("Label").sort()]))
+    
+    datas = json.load(open(r"output\analysis\svc-rbf.json", "r"))["data"]
+    for data in datas:
+        index = data["index"]
+        acc = round(data["accuracy"], 4)
+        f1 = round(data["f1"], 4)
+        recall = round(data["recall"], 4)
+        precision = round(data["precision"], 4)
+        print(f"{index} {acc} {f1} {recall} {precision}")
+
