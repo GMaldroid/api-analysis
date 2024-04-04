@@ -5,5 +5,5 @@ def decompile(source: str, destination: str):
         return
     filename = os.path.basename(source).replace('.apk', '')
     decompile_folder = os.path.join(destination, "extract-" + filename)
-    os.system("apktool d -f -r -o {} {}".format(decompile_folder, source))
+    os.system("apktool d -f -o {} {}".format(decompile_folder, source))
     return decompile_folder

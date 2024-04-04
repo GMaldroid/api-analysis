@@ -20,8 +20,18 @@ from sklearn.svm import SVC
 from sklearn.metrics import accuracy_score, f1_score, recall_score, precision_score
 from multiprocess.pool import Pool
 from matplotlib import pyplot as plt
+import xml.etree.ElementTree as ET
 
 def extract():
+    def extract_permission(source: str):
+        retval = []
+        tree = ET.parse(source)
+        root = tree.getroot()
+        for item in root.findall("uses-permission"):
+            perm = item.attrib['{http://schemas.android.com/apk/res/android}name']
+            retval.append(perm)
+        return retval
+
     def process_content(content: list[str]):
         retval = []
         list_api = []
@@ -50,6 +60,7 @@ def extract():
 
     def process_app(source: str, type: str, destination: str, output: str):
         try:
+            print(source)
             decompile_folder = decompile(source=source, destination=destination)
             smali_files = list_smali_files(decompile_folder)
 
@@ -58,12 +69,13 @@ def extract():
             contents = list(reduce(lambda a, b: np.concatenate((a, b)), contents))
             contents = {
                 "file_name": os.path.basename(source),
+                "permission": extract_permission(decompile_folder + "/AndroidManifest.xml"),
                 "type": type,
                 "data": contents
             }
 
             out_file = open('{}/{}.json'.format(output, os.path.basename(source)), 'w')
-            json.dump(contents, fp=out_file, indent=4)
+            out_file.write(json.dumps(contents, indent=4))
             out_file.close()
 
             rmtree(decompile_folder)
@@ -71,11 +83,12 @@ def extract():
             pass
         finally:
             os.remove(source)
+            pass
 
     list(map(lambda x: process_app(source=x, 
                                    type='benign', 
-                                   destination='D:\\Benign', 
-                                   output='./output/Benign'), list_files('D:\\Benign\\Benign')))
+                                   destination='D:\\Adware', 
+                                   output='./output/benign'), list_files('D:\\Benign\\Benign')))
 
 
 def total():
@@ -603,12 +616,10 @@ if __name__ == '__main__':
             app_api_split_test()
         exit(0)
     
-    datas = json.load(open(r"output\analysis\svc-rbf.json", "r"))["data"]
-    for data in datas:
-        index = data["index"]
-        acc = round(data["accuracy"], 4)
-        f1 = round(data["f1"], 4)
-        recall = round(data["recall"], 4)
-        precision = round(data["precision"], 4)
-        print(f"{index} {acc} {f1} {recall} {precision}")
+    files = list_files("O:\\malware-data\\riskware")
+    for file in files:
+        content = json.load(open(file, "r"))
+        print(content["type"])
+        content["type"] = "riskware"
+        open(file, "w").write(json.dumps(content, indent=4))
 
