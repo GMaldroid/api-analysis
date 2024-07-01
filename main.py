@@ -3,6 +3,8 @@ import os
 import json
 import numpy as np
 import pandas as pd
+from warnings import simplefilter
+simplefilter(action="ignore", category=pd.errors.PerformanceWarning)
 from collections import Counter
 from functools import reduce
 from Libraries.AndroidAPI import AndroidAPI
@@ -16,11 +18,13 @@ from sklearn.feature_selection import RFE
 from sklearn.decomposition import PCA
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
 from sklearn.metrics import accuracy_score, f1_score, recall_score, precision_score
 from multiprocess.pool import Pool
 from matplotlib import pyplot as plt
 import xml.etree.ElementTree as ET
+from mlxtend.frequent_patterns import fpgrowth
 
 def extract():
     def extract_permission(source: str):
@@ -87,8 +91,8 @@ def extract():
 
     list(map(lambda x: process_app(source=x, 
                                    type='benign', 
-                                   destination='D:\\Adware', 
-                                   output='./output/benign'), list_files('D:\\Benign\\Benign')))
+                                   destination='O:\\extract-mal', 
+                                   output='./output/benign'), list_files('D:/Anh-Huy/on_work/git/craw-data/benign')))
 
 
 def total():
@@ -279,6 +283,39 @@ def attach_ranking():
     
     open("./output/ranking/ranking.json", "w").write(json.dumps(result, indent=4))
 
+def create_app_api_fpgrowth():
+    result = list()
+    api_perm = json.load(open("perm+api.json", "r"))
+    list_benign = list_files("output/benign")
+    list_malware = list_files("output/malware")
+    list_train = list()
+    for benign in list_benign:
+        list_train.append(benign)
+    for malware in list_malware:
+        list_train.append(malware)
+    for i, app in enumerate(list_train):
+        print(i)
+        row = np.zeros((len(api_perm) + 1), dtype=int)
+        app_content = json.load(open(app, "r"))
+        for perm in app_content["permission"]:
+            for ele_api_perm in api_perm:
+                if ele_api_perm in perm:
+                    row[api_perm.index(ele_api_perm)] = 1
+        for data in app_content["data"]:
+            for api in data["api"]:
+                for ele_api_perm in api_perm:
+                    if ele_api_perm in api["full_api_call"]:
+                        row[api_perm.index(ele_api_perm)] = 1
+        if app_content["type"] == "benign":
+            row[len(api_perm)] = 0
+        else:
+            row[len(api_perm)] = 1
+        result.append(row)
+    
+    api_perm.append("label")
+    data_frame = pd.DataFrame(result, columns=api_perm)
+    data_frame.to_csv("output/paper/app-api.csv")
+
 def create_app_api():
     for top in range(10, 310, 10):
         api_dataset_path = f"output/do-an/top-api/top-{top}.json"
@@ -311,6 +348,35 @@ def create_app_api():
         api_dataset.append("Label")
 
         pd.DataFrame(matrix, columns=api_dataset).to_csv(save_path)
+
+def create_app_api2():
+    api_dataset_path = f"500-api-perm.json"
+    save_path = f"output/custome-adro/app-api.csv"
+
+    api_dataset = json.load(open(api_dataset_path, "r"))
+
+    def create_row(file: str, label):
+        print(file)
+        content = json.load(open(file, "r"))["data"]
+        result = np.zeros((len(api_dataset)), dtype=int)
+
+        for method in content:
+            for api_call in method["api"]:
+                if api_call["full_api_call"] in api_dataset:
+                    result[api_dataset.index(api_call["full_api_call"])] = 1
+        result = result.tolist()
+        result.append(label)
+        return result
+    
+    result = []
+    pool = Pool(10)
+    result.append(list(pool.map(lambda x: create_row(x, 0), list_files("output/benign"))))
+    result.append(list(pool.map(lambda x: create_row(x, 1), list_files("output/malware"))))
+    matrix = list(reduce(lambda x, y: np.concatenate((x, y)), result))
+
+    api_dataset.append("label")
+
+    pd.DataFrame(matrix, columns=api_dataset).to_csv(save_path, index=None)
 
 def create_invoke():
     api_dataset = json.load(open("output/do-an/top-api/top-200.json", "r"))["data"]
@@ -419,40 +485,37 @@ def create_package():
     
 
 def analysis_api():
-    def analysis(training_data_path: str, index):
-        print(training_data_path)
+    # def analysis(training_data_path: str, index):
 
-        data_frame = pd.read_csv(training_data_path, index_col=0, header=0)
-        training_header = list(data_frame.columns)
-        training_header.remove("Label")
+    data_frame = pd.read_csv("output/paper/lev2.csv", index_col=0, header=0)
+    training_header = list(data_frame.columns)
+    training_header.remove("label")
 
-        train_data = data_frame[training_header]
-        train_label = data_frame["Label"]
+    train_data = data_frame[training_header]
+    # train_data = train_data.iloc[:, -100:]
+    train_label = data_frame["label"]
 
-        x_train, x_test, y_train, y_test = train_test_split(train_data, train_label, test_size=0.3, random_state=50)
+    x_train, x_test, y_train, y_test = train_test_split(train_data, train_label, test_size=0.3, random_state=50)
 
-        model = SVC(kernel="sigmoid")
-        model.fit(x_train, y_train)
-        predict = model.predict(x_test)
+    model = RandomForestClassifier(n_estimators=10)
+    model.fit(x_train, y_train)
+    predict = model.predict(x_test)
 
-        return {
-            "index": index,
-            "accuracy": accuracy_score(y_test, predict),
-            "f1": f1_score(y_test, predict, average='weighted'),
-            "recall": recall_score(y_test, predict, average='weighted'),
-            "precision": precision_score(y_test, predict, average='weighted')
-        }
+    print(f"accuracy: {accuracy_score(y_test, predict)}")
+    print(f"f1: {f1_score(y_test, predict, average='weighted')}")
+    print(f"recall: {recall_score(y_test, predict, average='weighted')}")
+    print(f"precision: {precision_score(y_test, predict, average='weighted')}")
 
-    result = []
-    for i in range(10, 310, 10):
-        result.append(analysis(f"output/do-an/matrix/{i}/app-api.csv", i))
+    # result = []
+    # for i in range(10, 310, 10):
+    #     result.append(analysis(f"output/do-an/matrix/{i}/app-api.csv", i))
 
-    result = {
-        "description": "Training result",
-        "data": result
-    }
+    # result = {
+    #     "description": "Training result",
+    #     "data": result
+    # }
 
-    open("output/do-an/analysis/svc-sigmoid.json", "w").write(json.dumps(result, indent=4))
+    # open("output/do-an/analysis/svc-sigmoid.json", "w").write(json.dumps(result, indent=4))
 
 def agv():
     tree = json.load(open("output/do-an/analysis/svc-sigmoid.json", "r"))["data"]
@@ -573,6 +636,62 @@ def app_api_split_test():
 
     result = pd.concat([adware, banking, benign, riskware, smsmalware])
     pd.DataFrame(result.to_numpy(), columns=app_api_dp.columns).to_csv("output\\3000app\\test.csv")
+
+def run_fgrowth():
+    data_frame = pd.read_csv('output/paper/app-api.csv')
+    train_data = data_frame.drop(columns=['label'], axis=1)
+    train_data = train_data.astype(bool)
+    print(train_data.shape)
+    print(train_data)
+
+    data_priority = fpgrowth(train_data, min_support=0.4, use_colnames=True, max_len=2, verbose=1)
+    data_item = data_priority['itemsets']
+    data_value = data_priority['support']
+    data = dict(zip(data_item, data_value))
+    datres = {key: val for key, val in sorted(data.items(), key = lambda ele: ele[1], reverse = True)}
+    result_dat=[]
+    level_dat=[]
+    for key in datres.keys():
+        result_dat.append(key)
+    print("********************************************************************************************")
+    for i in result_dat:
+        if len(i)==2:
+            level_dat.append(i)
+    print(level_dat)
+    print(len(level_dat))
+    for i in datres:
+        if i in level_dat:
+            print(i, datres[i])
+    
+    df=pd.DataFrame()
+    w=[list (x) for x in level_dat]
+    print(len(w))
+    for i in range(len(w)):
+        r = train_data[w[i]]
+        binary_features=[i for i in r.columns]
+        conditions = [(train_data[binary_features[0]] == 1) & (train_data[binary_features[1]] == 1)]
+        choices1 = [1]
+        df['x' + str(i)] = np.select(conditions, choices1, default=0)
+    df['label']=data_frame['label']
+    df.to_csv('output/paper/lev2.csv',index=False)
+
+def reverse_api():
+    list_train = list_files("./output/train")
+    api_perm = json.load(open("perm+api.json", "r"))
+    api_perm_reverse = set()
+    for index, file in enumerate(list_train):
+        print(index)
+        file_content = json.load(open(file, "r"))
+        for app_perm in file_content["permission"]:
+            for perm in api_perm:
+                if perm in app_perm:
+                    api_perm_reverse.add(app_perm)
+        for data in file_content["data"]:
+            for api in data["api"]:
+                if api["method_name"] in api_perm:
+                    api_perm_reverse.add(api["full_api_call"])
+    open("lev2.csv", "w").write(json.dumps(list(api_perm_reverse), indent=4))
+    ...
     
 if __name__ == '__main__':
     if (len(sys.argv) > 1):
@@ -614,12 +733,7 @@ if __name__ == '__main__':
             app_api_split()
         if sys.argv[1] == 'app-api-split-test':
             app_api_split_test()
+        if sys.argv[1] == 'reverse-api':
+            reverse_api()
         exit(0)
-    
-    files = list_files("O:\\malware-data\\riskware")
-    for file in files:
-        content = json.load(open(file, "r"))
-        print(content["type"])
-        content["type"] = "riskware"
-        open(file, "w").write(json.dumps(content, indent=4))
 
